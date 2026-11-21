@@ -1,0 +1,6 @@
+{
+  "name": "VoxelForge Browser Launcher",
+  "description": "High-performance Minecraft browser launcher and 3D voxel engine for Android and Windows, supporting versions 1.0 through 1.26.3.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

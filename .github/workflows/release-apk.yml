@@ -1,0 +1,191 @@
+name: Build & Release APK and Windows EXE
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-app-apk:
+    name: Build VoxelForge Android App APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build exact web app bundle for Android
+        run: |
+          npm ci
+          npm run build
+          rm -rf android-apk/app/src/main/assets
+          mkdir -p android-apk/app/src/main/assets
+          cp -r dist/* android-apk/app/src/main/assets/
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android Build Tools & Platform 34
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build Release APK
+        working-directory: android-apk
+        run: gradle assembleRelease
+
+      - name: Align & Sign APK
+        run: |
+          APK_UNSIGNED="android-apk/app/build/outputs/apk/release/app-release-unsigned.apk"
+          APK_OUT="voxelforge-android.apk"
+          KEYSTORE="/tmp/app-release.keystore"
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$KEYSTORE"
+            PASS="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
+          else
+            keytool -genkey -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=VoxelForge,O=Android,C=US"
+            PASS="android"
+            ALIAS="androiddebugkey"
+          fi
+          ${{ env.ANDROID_SDK_ROOT }}/build-tools/34.0.0/zipalign -p 4 "$APK_UNSIGNED" /tmp/app-aligned.apk
+          ${{ env.ANDROID_SDK_ROOT }}/build-tools/34.0.0/apksigner sign --ks "$KEYSTORE" --ks-pass "pass:$PASS" --ks-key-alias "$ALIAS" --out "$APK_OUT" /tmp/app-aligned.apk
+
+      - name: Upload VoxelForge Android App APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxelforge-android-app-apk
+          path: voxelforge-android.apk
+
+  build-android-apk:
+    name: Build Rust Native Android APK (ARM64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK 27 & Build Tools
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;27.2.12479018"
+
+      - name: Set up Rust & Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Compile Rust library for Android ARM64
+        working-directory: rust-launcher
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
+        run: |
+          cargo ndk -t arm64-v8a -p 26 -o ./android/app/src/main/jniLibs build --release
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build Android APK
+        working-directory: rust-launcher/android
+        run: gradle assembleRelease
+
+      - name: Sign APK (Debug keystore fallback if release keystore not configured)
+        id: sign
+        run: |
+          APK_UNSIGNED="rust-launcher/android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          APK_OUT="voxelforge-rust-launcher-arm64.apk"
+          KEYSTORE="/tmp/release.keystore"
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$KEYSTORE"
+            PASS="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
+          else
+            keytool -genkey -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=VoxelForge,O=Android,C=US"
+            PASS="android"
+            ALIAS="androiddebugkey"
+          fi
+          ${{ env.ANDROID_SDK_ROOT }}/build-tools/34.0.0/zipalign -p 4 "$APK_UNSIGNED" /tmp/aligned.apk
+          ${{ env.ANDROID_SDK_ROOT }}/build-tools/34.0.0/apksigner sign --ks "$KEYSTORE" --ks-pass "pass:$PASS" --ks-key-alias "$ALIAS" --out "$APK_OUT" /tmp/aligned.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxelforge-android-apk
+          path: voxelforge-rust-launcher-arm64.apk
+
+  build-windows-exe:
+    name: Build Windows EXE (x86_64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Compile Windows binary
+        working-directory: rust-launcher
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Copy EXE
+        shell: bash
+        run: cp rust-launcher/target/x86_64-pc-windows-msvc/release/voxelforge-windows.exe voxelforge-rust-launcher-win64.exe
+
+      - name: Upload Windows EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxelforge-windows-exe
+          path: voxelforge-rust-launcher-win64.exe
+
+  github-release:
+    name: Publish GitHub Release
+    needs: [build-app-apk, build-android-apk, build-windows-exe]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/voxelforge-android-app-apk/voxelforge-android.apk
+            artifacts/voxelforge-android-apk/voxelforge-rust-launcher-arm64.apk
+            artifacts/voxelforge-windows-exe/voxelforge-rust-launcher-win64.exe
