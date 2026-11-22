@@ -25,6 +25,9 @@ pub struct MinecraftRelease {
 
 pub fn version_catalog() -> Vec<MinecraftRelease> {
     vec![
+        MinecraftRelease { id: "26.3", title: "Java Edition 26.3", era: "Java Official", year: 2026, java_major: 25, min_ram_mb: 2048 },
+        MinecraftRelease { id: "26.2", title: "Java Edition 26.2", era: "Java Official", year: 2026, java_major: 25, min_ram_mb: 2048 },
+        MinecraftRelease { id: "26.1", title: "Java Edition 26.1", era: "Java Official", year: 2026, java_major: 25, min_ram_mb: 2048 },
         MinecraftRelease { id: "1.26.3", title: "Vibrant Horizons", era: "Next-Gen", year: 2026, java_major: 21, min_ram_mb: 2048 },
         MinecraftRelease { id: "1.26.2", title: "Pale Canopy", era: "Next-Gen", year: 2026, java_major: 21, min_ram_mb: 2048 },
         MinecraftRelease { id: "1.26.1", title: "Skyward Patch", era: "Next-Gen", year: 2026, java_major: 21, min_ram_mb: 2048 },

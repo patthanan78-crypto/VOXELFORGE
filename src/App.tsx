@@ -7,6 +7,11 @@ import {
   PerformancePreset,
   PlatformTarget,
 } from './data/versions';
+import {
+  FORGE_MODS_CATALOG,
+  ForgeModId,
+  ModCodeLanguage,
+} from './data/forgeMods';
 import { BlockId, HOTBAR_BLOCKS } from './engine/blocks';
 import { EngineStats, VoxelWorldEngine } from './engine/voxelWorld';
 import { voxelAudio } from './engine/audio';
@@ -18,7 +23,13 @@ import {
   saveLauncherPrefs,
   SavedWorldState,
   saveWorldState,
+  WorldType,
 } from './engine/worldStorage';
+import {
+  JavaAccountState,
+  loadJavaAccountState,
+  saveJavaAccountState,
+} from './engine/javaAccount';
 import { LauncherOverlay } from './components/LauncherOverlay';
 import { GameMainMenu } from './components/GameMainMenu';
 import { GameHUD } from './components/GameHUD';
@@ -42,6 +53,10 @@ function getInitialPrefs() {
     prefs?.gameMode === 'creative' || prefs?.gameMode === 'survival'
       ? prefs.gameMode
       : 'creative';
+  const worldType: WorldType =
+    prefs?.worldType === 'normal' || prefs?.worldType === 'superflat'
+      ? prefs.worldType
+      : 'superflat';
   const seed =
     typeof prefs?.seed === 'string' && prefs.seed.trim().length > 0
       ? prefs.seed
@@ -57,16 +72,25 @@ function getInitialPrefs() {
     prefs.dayCycleSpeed >= 0
       ? prefs.dayCycleSpeed
       : 1;
+  const validModIds = new Set<ForgeModId>(FORGE_MODS_CATALOG.map((m) => m.id));
+  const activeMods: ForgeModId[] = Array.isArray(prefs?.activeMods)
+    ? prefs.activeMods.filter((id): id is ForgeModId => validModIds.has(id))
+    : ['drin_anchors', 'minecraft_transit_railway', 'effortless_building'];
+  // Java Code Pane stays ON by default; Rust Mod Code is selected only by explicit manual click
+  const modCodeLang: ModCodeLanguage = prefs?.modCodeLang === 'rust' ? 'rust' : 'java';
 
   return {
     version: matchedVersion,
     platform,
     performance,
     gameMode,
+    worldType,
     seed,
     muted,
     shaderPack,
     dayCycleSpeed,
+    activeMods,
+    modCodeLang,
   };
 }
 
@@ -84,13 +108,17 @@ export default function App() {
   const [platform, setPlatform] = useState<PlatformTarget>(initialPrefs.platform);
   const [performance, setPerformance] = useState<PerformancePreset>(initialPrefs.performance);
   const [gameMode, setGameMode] = useState<GameMode>(initialPrefs.gameMode);
+  const [worldType, setWorldType] = useState<WorldType>(initialPrefs.worldType);
   const [seed, setSeed] = useState<string>(initialPrefs.seed);
   const [shaderPack, setShaderPack] = useState<ShaderPackId>(initialPrefs.shaderPack);
   const [dayCycleSpeed, setDayCycleSpeed] = useState<number>(initialPrefs.dayCycleSpeed);
+  const [activeMods, setActiveMods] = useState<ForgeModId[]>(initialPrefs.activeMods);
+  const [modCodeLang, setModCodeLang] = useState<ModCodeLanguage>(initialPrefs.modCodeLang);
+  const [javaAccount, setJavaAccount] = useState<JavaAccountState>(() => loadJavaAccountState());
 
   const [hotbar, setHotbar] = useState<BlockId[]>(() => [...HOTBAR_BLOCKS]);
-  const [activeSlot, setActiveSlot] = useState<number>(0);
-  const activeSlotRef = useRef<number>(0);
+  const [activeSlot, setActiveSlot] = useState<number>(1);
+  const activeSlotRef = useRef<number>(1);
   const hotbarRef = useRef<BlockId[]>(hotbar);
 
   const [tileIcons, setTileIcons] = useState<Record<number, string>>({});
@@ -116,6 +144,35 @@ export default function App() {
     worldTime: 0.16,
     timeText: '09:50',
     timePhase: 'Day',
+    trackWalkMode: true,
+    trackCurveStyle: 'smooth',
+    trackAnchor: null,
+    trainInteraction: {
+      riding: false,
+      seated: false,
+      depotId: null,
+      trainName: null,
+      carIndex: 0,
+      carCount: 0,
+      doorOpen: false,
+      doorProgress: 0,
+      trainStatus: null,
+      nearbyTrain: null,
+      onboardNpcCount: 0,
+    },
+    effortless: {
+      enabled: initialPrefs.activeMods.includes('effortless_building'),
+      mode: 'normal',
+      mirrorX: false,
+      mirrorZ: false,
+      radial: false,
+      hollow: false,
+      mirrorCenter: [8, 5, 8],
+      hasAnchor: false,
+      anchorPos: null,
+      previewCount: 0,
+      undoCount: 0,
+    },
   });
 
   // Sync refs and audio mute state
@@ -142,12 +199,31 @@ export default function App() {
       platform,
       performance,
       gameMode,
+      worldType,
       seed,
       muted,
       shaderPack,
       dayCycleSpeed,
+      activeMods,
+      modCodeLang,
     });
-  }, [selectedVersion.id, platform, performance, gameMode, seed, muted, shaderPack, dayCycleSpeed]);
+  }, [
+    selectedVersion.id,
+    platform,
+    performance,
+    gameMode,
+    worldType,
+    seed,
+    muted,
+    shaderPack,
+    dayCycleSpeed,
+    activeMods,
+    modCodeLang,
+  ]);
+
+  useEffect(() => {
+    saveJavaAccountState(javaAccount);
+  }, [javaAccount]);
 
   const persistCurrentWorld = useCallback(async (showFeedback = false) => {
     const engine = engineRef.current;
@@ -222,9 +298,11 @@ export default function App() {
         platform,
         performance,
         gameMode,
+        worldType,
         seed,
         shaderPack,
         dayCycleSpeed,
+        activeMods,
       },
       {
         onStats: (nextStats) => setStats(nextStats),
@@ -240,7 +318,7 @@ export default function App() {
     );
 
     engineRef.current = engine;
-    engine.setSelectedBlock(hotbarRef.current[activeSlotRef.current] ?? BlockId.Grass);
+    engine.setSelectedBlock(hotbarRef.current[activeSlotRef.current] ?? BlockId.OakPlanks);
 
     const canvas = mount.querySelector('canvas');
     const onLost = (e: Event) => {
@@ -275,12 +353,13 @@ export default function App() {
       platform,
       performance,
       gameMode,
+      worldType,
       seed,
       shaderPack,
       dayCycleSpeed,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedVersion, platform, performance, gameMode, seed]);
+  }, [selectedVersion, platform, performance, gameMode, worldType, seed]);
 
   // Fast live shader pack & day/night speed updates (zero chunk rebuild)
   useEffect(() => {
@@ -291,13 +370,17 @@ export default function App() {
     engineRef.current?.setDayCycleSpeed(dayCycleSpeed);
   }, [dayCycleSpeed]);
 
-  // Load saved world state for active (version, seed) whenever initialized or changed
+  useEffect(() => {
+    engineRef.current?.setActiveMods(activeMods);
+  }, [activeMods]);
+
+  // Load saved world state for active (version, seed, worldType) whenever initialized or changed
   useEffect(() => {
     const seq = ++worldLoadSeqRef.current;
     setSaveStatus('idle');
 
     void (async () => {
-      const saved = await loadWorldState(selectedVersion.id, seed);
+      const saved = await loadWorldState(selectedVersion.id, seed, worldType);
       if (seq !== worldLoadSeqRef.current) return;
 
       setSavedWorld(saved);
@@ -307,24 +390,24 @@ export default function App() {
           const restoredSlot =
             typeof saved.activeSlot === 'number' && saved.activeSlot >= 0 && saved.activeSlot < 9
               ? saved.activeSlot
-              : 0;
+              : 1;
           hotbarRef.current = restoredHotbar;
           activeSlotRef.current = restoredSlot;
           setHotbar(restoredHotbar);
           setActiveSlot(restoredSlot);
-          engineRef.current?.setSelectedBlock(restoredHotbar[restoredSlot] ?? BlockId.Grass);
+          engineRef.current?.setSelectedBlock(restoredHotbar[restoredSlot] ?? BlockId.OakPlanks);
         }
         engineRef.current?.importWorldState(saved);
       } else {
         const defaultHotbar = [...HOTBAR_BLOCKS];
         hotbarRef.current = defaultHotbar;
-        activeSlotRef.current = 0;
+        activeSlotRef.current = 1;
         setHotbar(defaultHotbar);
-        setActiveSlot(0);
-        engineRef.current?.setSelectedBlock(defaultHotbar[0]);
+        setActiveSlot(1);
+        engineRef.current?.setSelectedBlock(defaultHotbar[1]);
       }
     })();
-  }, [selectedVersion.id, seed]);
+  }, [selectedVersion.id, seed, worldType]);
 
   // Periodic position/progress auto-save while playing + pagehide/visibilitychange safety save
   useEffect(() => {
@@ -406,17 +489,17 @@ export default function App() {
       window.clearTimeout(saveDebounceRef.current);
       saveDebounceRef.current = null;
     }
-    void deleteWorldState(selectedVersion.id, seed);
+    void deleteWorldState(selectedVersion.id, seed, worldType);
     const defaultHotbar = [...HOTBAR_BLOCKS];
     hotbarRef.current = defaultHotbar;
-    activeSlotRef.current = 0;
+    activeSlotRef.current = 1;
     setHotbar(defaultHotbar);
-    setActiveSlot(0);
-    engineRef.current?.setSelectedBlock(defaultHotbar[0]);
+    setActiveSlot(1);
+    engineRef.current?.setSelectedBlock(defaultHotbar[1]);
     engineRef.current?.resetWorld();
     setSavedWorld(null);
     setSaveStatus('idle');
-  }, [selectedVersion.id, seed]);
+  }, [selectedVersion.id, seed, worldType]);
 
   const handleSetWorldTime = useCallback(
     (t: number) => {
@@ -450,6 +533,20 @@ export default function App() {
       }
     },
     [activeSlot, scheduleAutoSave],
+  );
+
+  const handleExecuteCommand = useCallback(
+    (cmd: string): string => {
+      const engine = engineRef.current;
+      if (!engine) return '';
+      const res = engine.executeCommand(cmd);
+      if (res.gameModeChanged) {
+        setGameMode(res.gameModeChanged);
+      }
+      scheduleAutoSave();
+      return res.reply;
+    },
+    [scheduleAutoSave],
   );
 
   // Enter shortcut from Title Launcher -> opens Main Menu; Enter from Main Menu -> enters world
@@ -498,12 +595,20 @@ export default function App() {
           onSelectShaderPack={setShaderPack}
           gameMode={gameMode}
           onSelectGameMode={setGameMode}
+          worldType={worldType}
+          onSelectWorldType={setWorldType}
           seed={seed}
           onChangeSeed={setSeed}
+          account={javaAccount}
+          onChangeAccount={setJavaAccount}
           muted={muted}
           onToggleMute={handleToggleMute}
           savedWorld={savedWorld}
           onDeleteSave={handleResetWorld}
+          activeMods={activeMods}
+          onChangeActiveMods={setActiveMods}
+          modCodeLang={modCodeLang}
+          onChangeModCodeLang={setModCodeLang}
           onLaunch={handleLaunchToMenu}
         />
       )}
@@ -514,6 +619,7 @@ export default function App() {
           version={selectedVersion}
           seed={seed}
           gameMode={gameMode}
+          worldType={worldType}
           platform={platform}
           performance={performance}
           shaderPack={shaderPack}
@@ -522,9 +628,12 @@ export default function App() {
           timePhase={stats.timePhase}
           muted={muted}
           savedWorld={savedWorld}
+          account={javaAccount}
+          onChangeAccount={setJavaAccount}
           onEnterWorld={handleEnterWorld}
           onBackToLauncher={handleReturnToLauncher}
           onChangeGameMode={setGameMode}
+          onChangeWorldType={setWorldType}
           onChangePlatform={setPlatform}
           onChangePerformance={setPerformance}
           onChangeShaderPack={setShaderPack}
@@ -542,6 +651,7 @@ export default function App() {
           platform={platform}
           performance={performance}
           gameMode={gameMode}
+          worldType={worldType}
           shaderPack={shaderPack}
           dayCycleSpeed={dayCycleSpeed}
           stats={stats}
@@ -551,6 +661,9 @@ export default function App() {
           muted={muted}
           paused={shellState === 'paused'}
           saveStatus={saveStatus}
+          activeMods={activeMods}
+          onChangeActiveMods={setActiveMods}
+          modCodeLang={modCodeLang}
           onSelectSlot={(idx) => handleHotbarSlotCallback(idx)}
           onReplaceActiveBlock={handleReplaceActiveBlock}
           onToggleMute={handleToggleMute}
@@ -562,16 +675,104 @@ export default function App() {
           onResetWorld={handleResetWorld}
           onChangePlatform={setPlatform}
           onChangePerformance={setPerformance}
+          onChangeWorldType={setWorldType}
           onChangeShaderPack={setShaderPack}
           onSetWorldTime={handleSetWorldTime}
           onChangeDayCycleSpeed={setDayCycleSpeed}
           onTouchJoystick={(x, y) => engineRef.current?.setTouchJoystick(x, y)}
           onTouchLookDelta={(dx, dy) => engineRef.current?.addTouchLookDelta(dx, dy)}
           onTouchJump={() => engineRef.current?.triggerJump()}
+          onTouchDescend={(active) => engineRef.current?.setTouchDescend(active)}
+          onTouchSprint={(active) => engineRef.current?.setTouchSprint(active)}
           onTouchFly={() => engineRef.current?.toggleFly()}
           onTouchBreak={() => engineRef.current?.triggerBreakBlock()}
           onTouchPlace={() => engineRef.current?.triggerPlaceBlock()}
+          onExecuteCommand={handleExecuteCommand}
           onRequestPointerLock={() => engineRef.current?.requestPointerLock()}
+          onScanMtrTracks={() =>
+            engineRef.current?.scanMtrTracks() ?? {
+              normalCount: 0,
+              stationCount: 0,
+              depotCount: 0,
+              stationPositions: [],
+              depotPositions: [],
+            }
+          }
+          onGetMtrDepots={() => engineRef.current?.getMtrDepots() ?? []}
+          onGetMtrTelemetry={() => engineRef.current?.getMtrTrainTelemetry() ?? []}
+          onGetMtrSchedule={() =>
+            engineRef.current?.getMtrTrainSchedule() ?? {
+              stations: [],
+              totalDispatchedTrains: 0,
+              generatedAt: Date.now(),
+            }
+          }
+          onUpsertMtrDepot={(depot) => {
+            engineRef.current?.upsertMtrDepot(depot);
+            scheduleAutoSave();
+          }}
+          onDeleteMtrDepot={(depotId) => {
+            engineRef.current?.deleteMtrDepot(depotId);
+            scheduleAutoSave();
+          }}
+          onReverseMtrTrain={(depotId) => {
+            engineRef.current?.reverseTrainDirection(depotId);
+            scheduleAutoSave();
+          }}
+          onBuildStarterMtrLine={() => {
+            const built = engineRef.current?.buildStarterMtrLine() ?? {
+              depotPos: [16, 5, 8],
+              stationPos: [28, 5, 8],
+            };
+            scheduleAutoSave();
+            return built;
+          }}
+          onPlaceMtrTrackSegment={(opts) => {
+            const placed = engineRef.current?.placeMtrTrackSegment(opts) ?? {
+              placedCount: 0,
+              endPos: [8, 5, 8],
+              stationPlaced: false,
+            };
+            scheduleAutoSave();
+            return placed;
+          }}
+          onBuildCurvedMtrLoop={(straightLen, turnSpan) => {
+            const built = engineRef.current?.buildCurvedLoopMtrLine(straightLen, turnSpan) ?? {
+              depotPos: [18, 5, 19],
+              stationPos: [28, 5, 18],
+              trackCount: 0,
+            };
+            scheduleAutoSave();
+            return built;
+          }}
+          onToggleRideTrain={(depotId) => engineRef.current?.toggleRideTrain(depotId) ?? false}
+          onBoardOrExitTrain={() => engineRef.current?.boardOrExitNearestTrain() ?? false}
+          onToggleSitInTrain={() => engineRef.current?.toggleSitInTrain() ?? false}
+          onToggleTrainDoors={(depotId) => engineRef.current?.toggleTrainDoors(depotId) ?? false}
+          onSwitchTrainCar={(delta) => engineRef.current?.switchTrainCar(delta)}
+          onWarpToPoint={(x, y, z) => engineRef.current?.warpToPoint(x, y, z)}
+          onSetTrackWalkMode={(enabled) => engineRef.current?.setTrackWalkMode(enabled)}
+          onSetTrackCurveStyle={(style) => engineRef.current?.setTrackCurveStyle(style)}
+          onConfirmTrackAnchor={() => {
+            const res = engineRef.current?.confirmTrackAnchorPlacement() ?? null;
+            if (res) scheduleAutoSave();
+            return res;
+          }}
+          onCancelTrackAnchor={() => engineRef.current?.cancelTrackAnchor()}
+          onSetMtrAnnouncement={(ann) => {
+            engineRef.current?.setMtrAnnouncement(ann);
+            scheduleAutoSave();
+          }}
+          onDeleteMtrAnnouncement={(stationId) => {
+            engineRef.current?.deleteMtrAnnouncement(stationId);
+            scheduleAutoSave();
+          }}
+          onTestMtrAnnouncement={(stationId) => engineRef.current?.testStationAnnouncement(stationId)}
+          onSetEffortlessMode={(mode) => engineRef.current?.setEffortlessMode(mode)}
+          onSetEffortlessOption={(opt, value) => engineRef.current?.setEffortlessOption(opt, value)}
+          onSetEffortlessMirrorCenterHere={() => engineRef.current?.setEffortlessMirrorCenterHere()}
+          onCancelEffortlessAnchor={() => engineRef.current?.cancelEffortlessAnchor()}
+          onUndoEffortless={() => engineRef.current?.undoEffortlessBuild()}
         />
       )}
     </div>

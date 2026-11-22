@@ -164,8 +164,9 @@ export function getRustRuntimeSummary(
   performance: PerformancePreset,
 ): RustRuntimeSummary {
   const majorMinor = version.id.split('.').slice(0, 2).map(Number);
+  const major = majorMinor[0] || 1;
   const minor = majorMinor[1] || 0;
-  const javaVersion = minor >= 21 ? 21 : minor >= 18 ? 17 : minor >= 17 ? 16 : 8;
+  const javaVersion = major >= 26 ? 25 : minor >= 21 ? 21 : minor >= 18 ? 17 : minor >= 17 ? 16 : 8;
 
   const targetTriple =
     platform === 'android' ? 'aarch64-linux-android' : 'x86_64-pc-windows-msvc';

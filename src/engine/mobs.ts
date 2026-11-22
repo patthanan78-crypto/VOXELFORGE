@@ -1,18 +1,113 @@
 import * as THREE from 'three';
 
+export type MobTransitState = 'roam' | 'wait_platform' | 'riding' | 'alighting';
+
 export interface VoxelMob {
+  id: number;
   group: THREE.Group;
-  kind: 'explorer' | 'pig';
+  kind: 'explorer' | 'pig' | 'slime';
   legs: THREE.Mesh[];
   arms: THREE.Mesh[];
   head: THREE.Group;
   x: number;
+  y: number;
   z: number;
   vx: number;
+  vy: number;
   vz: number;
+  onGround: boolean;
+  halfWidth: number;
+  height: number;
   yaw: number;
   walkPhase: number;
   turnTimer: number;
+  hopPhase: number;
+  transitState: MobTransitState;
+  ridingDepotId: string | null;
+  ridingCarIndex: number;
+  seatSlotIndex: number;
+  boardedStationKey: string | null;
+  transitCooldown: number;
+  targetWaitPos: [number, number, number] | null;
+}
+
+let nextMobId = 1;
+
+export function createVoxelSlimeMob(scaleFactor = 1.0): VoxelMob {
+  const group = new THREE.Group();
+
+  const outerMat = new THREE.MeshStandardMaterial({
+    color: 0x6cd94e,
+    transparent: true,
+    opacity: 0.72,
+    roughness: 0.35,
+    metalness: 0.02,
+    depthWrite: false,
+  });
+  const innerMat = new THREE.MeshStandardMaterial({
+    color: 0x459e30,
+    roughness: 0.65,
+    metalness: 0.0,
+  });
+  const faceMat = new THREE.MeshStandardMaterial({
+    color: 0x183814,
+    roughness: 0.4,
+    metalness: 0.0,
+  });
+
+  const s = 0.88 * scaleFactor;
+  const outer = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), outerMat);
+  outer.position.set(0, s * 0.5, 0);
+  outer.renderOrder = 3;
+
+  const inner = new THREE.Mesh(new THREE.BoxGeometry(s * 0.68, s * 0.68, s * 0.68), innerMat);
+  inner.position.set(0, s * 0.5, 0);
+  inner.castShadow = true;
+
+  const head = new THREE.Group();
+  head.position.set(0, s * 0.5, 0);
+
+  const eyeSize = s * 0.14;
+  const eyeL = new THREE.Mesh(new THREE.BoxGeometry(eyeSize, eyeSize, 0.06), faceMat);
+  eyeL.position.set(-s * 0.17, s * 0.1, s * 0.35);
+
+  const eyeR = new THREE.Mesh(new THREE.BoxGeometry(eyeSize, eyeSize, 0.06), faceMat);
+  eyeR.position.set(s * 0.17, s * 0.1, s * 0.35);
+
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(s * 0.1, s * 0.09, 0.06), faceMat);
+  mouth.position.set(s * 0.05, -s * 0.12, s * 0.35);
+
+  head.add(eyeL, eyeR, mouth);
+  group.add(inner, head, outer);
+
+  return {
+    id: nextMobId++,
+    group,
+    kind: 'slime',
+    legs: [],
+    arms: [],
+    head,
+    x: 0,
+    y: 5,
+    z: 0,
+    vx: 0,
+    vy: 0,
+    vz: 0,
+    onGround: false,
+    halfWidth: s * 0.48,
+    height: s,
+    yaw: 0,
+    walkPhase: Math.random() * Math.PI * 2,
+    turnTimer: 1.5 + Math.random() * 3,
+    hopPhase: Math.random() * Math.PI * 2,
+    transitState: 'roam',
+    ridingDepotId: null,
+    ridingCarIndex: 0,
+    seatSlotIndex: -1,
+    boardedStationKey: null,
+    transitCooldown: 0,
+    targetWaitPos: null,
+  };
 }
 
 export function createVoxelExplorerMob(accentColor: number): VoxelMob {
@@ -78,18 +173,32 @@ export function createVoxelExplorerMob(accentColor: number): VoxelMob {
   group.add(leftLeg, rightLeg, torso, belt, leftArm, rightArm, head);
 
   return {
+    id: nextMobId++,
     group,
     kind: 'explorer',
     legs: [leftLeg, rightLeg],
     arms: [leftArm, rightArm],
     head,
     x: 0,
+    y: 5,
     z: 0,
     vx: 0,
+    vy: 0,
     vz: 0,
+    onGround: false,
+    halfWidth: 0.28,
+    height: 1.9,
     yaw: 0,
     walkPhase: Math.random() * Math.PI * 2,
     turnTimer: 2 + Math.random() * 4,
+    hopPhase: 0,
+    transitState: 'roam',
+    ridingDepotId: null,
+    ridingCarIndex: 0,
+    seatSlotIndex: -1,
+    boardedStationKey: null,
+    transitCooldown: 2 + Math.random() * 4,
+    targetWaitPos: null,
   };
 }
 
@@ -138,18 +247,32 @@ export function createVoxelPigMob(): VoxelMob {
   group.add(fl, fr, bl, br, body, head);
 
   return {
+    id: nextMobId++,
     group,
     kind: 'pig',
     legs: [fl, fr, bl, br],
     arms: [],
     head,
     x: 0,
+    y: 5,
     z: 0,
     vx: 0,
+    vy: 0,
     vz: 0,
+    onGround: false,
+    halfWidth: 0.34,
+    height: 0.95,
     yaw: 0,
     walkPhase: Math.random() * Math.PI * 2,
     turnTimer: 2 + Math.random() * 4,
+    hopPhase: 0,
+    transitState: 'roam',
+    ridingDepotId: null,
+    ridingCarIndex: 0,
+    seatSlotIndex: -1,
+    boardedStationKey: null,
+    transitCooldown: 0,
+    targetWaitPos: null,
   };
 }
 

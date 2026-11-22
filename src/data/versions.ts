@@ -27,6 +27,9 @@ export interface MinecraftVersion {
   hasCopper: boolean;
   classicAlphaShade: boolean;
   summary: string;
+  isOfficialJava?: boolean;
+  manifestUrl?: string;
+  releaseType?: 'release' | 'snapshot' | 'old_beta' | 'old_alpha';
 }
 
 export const VERSION_ERAS: { id: 'all' | VersionEraId; label: string }[] = [
@@ -152,6 +155,21 @@ function makeVer(
 }
 
 export const MINECRAFT_VERSIONS: MinecraftVersion[] = [
+  // Official Mojang Java Edition 26.x (2026)
+  makeVer('26.3', 'Java Edition 26.3', 'nextgen', 2026, 'Latest official Minecraft: Java Edition 26.3 release with Java 25 runtime support.', {
+    isOfficialJava: true,
+    releaseType: 'release',
+    manifestUrl: 'https://piston-meta.mojang.com/v1/packages/ead839cbccf0ddf013c3f935f2840080b5cb0d26/26.3.json',
+  }),
+  makeVer('26.2', 'Java Edition 26.2', 'nextgen', 2026, 'Official 2026 Minecraft: Java Edition 26.2 release for PC & mobile JVM.', {
+    isOfficialJava: true,
+    releaseType: 'release',
+  }),
+  makeVer('26.1', 'Java Edition 26.1', 'nextgen', 2026, 'Official 2026 Minecraft: Java Edition 26.1 release.', {
+    isOfficialJava: true,
+    releaseType: 'release',
+  }),
+
   // 1.26.x
   makeVer('1.26.3', 'Vibrant Horizons', 'nextgen', 2026, 'Latest 1.26.3 release with peak chunk culling, vibrant foliage, and balanced mountain valleys.'),
   makeVer('1.26.2', 'Pale Canopy', 'nextgen', 2026, 'Performance-tuned 1.26.2 build with refined biome transitions and fast mesh batching.'),

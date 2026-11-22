@@ -6,8 +6,17 @@ import {
   PlatformTarget,
 } from '../data/versions';
 import { getShaderPack, SHADER_PACKS, ShaderPackId } from '../engine/shaderPacks';
-import { normalizeSeed, SavedWorldState } from '../engine/worldStorage';
+import { normalizeSeed, SavedWorldState, WorldType } from '../engine/worldStorage';
 import { TimePhase } from '../engine/voxelWorld';
+import {
+  computeJavaOfflineUuid,
+  JavaAccountState,
+  sanitizeJavaUsername,
+} from '../engine/javaAccount';
+import {
+  buildJavaCliArgs,
+  buildJavaLaunchScript,
+} from '../engine/javaManifest';
 import {
   Play,
   Sparkles,
@@ -24,12 +33,18 @@ import {
   RotateCcw,
   ChevronRight,
   Check,
+  Globe,
+  Plus,
+  Trash2,
+  Copy,
+  Download,
 } from 'lucide-react';
 
 interface GameMainMenuProps {
   version: MinecraftVersion;
   seed: string;
   gameMode: GameMode;
+  worldType: WorldType;
   platform: PlatformTarget;
   performance: PerformancePreset;
   shaderPack: ShaderPackId;
@@ -38,9 +53,12 @@ interface GameMainMenuProps {
   timePhase: TimePhase;
   muted: boolean;
   savedWorld: SavedWorldState | null;
+  account: JavaAccountState;
+  onChangeAccount: (next: JavaAccountState) => void;
   onEnterWorld: () => void;
   onBackToLauncher: () => void;
   onChangeGameMode: (mode: GameMode) => void;
+  onChangeWorldType: (wt: WorldType) => void;
   onChangePlatform: (p: PlatformTarget) => void;
   onChangePerformance: (perf: PerformancePreset) => void;
   onChangeShaderPack: (pack: ShaderPackId) => void;
@@ -54,6 +72,7 @@ export const GameMainMenu: React.FC<GameMainMenuProps> = ({
   version,
   seed,
   gameMode,
+  worldType,
   platform,
   performance,
   shaderPack,
@@ -62,9 +81,12 @@ export const GameMainMenu: React.FC<GameMainMenuProps> = ({
   timePhase,
   muted,
   savedWorld,
+  account,
+  onChangeAccount,
   onEnterWorld,
   onBackToLauncher,
   onChangeGameMode,
+  onChangeWorldType,
   onChangePlatform,
   onChangePerformance,
   onChangeShaderPack,
@@ -73,17 +95,80 @@ export const GameMainMenu: React.FC<GameMainMenuProps> = ({
   onToggleMute,
   onResetWorld,
 }) => {
-  const [subView, setSubView] = useState<'main' | 'shaders' | 'options'>('main');
+  const [subView, setSubView] = useState<'main' | 'multiplayer' | 'shaders' | 'options'>('main');
   const [confirmReset, setConfirmReset] = useState(false);
+  const [newServerName, setNewServerName] = useState('');
+  const [newServerAddr, setNewServerAddr] = useState('');
+  const [selectedServerAddr, setSelectedServerAddr] = useState<string>(
+    account.servers[0]?.address ?? '127.0.0.1:25565',
+  );
+  const [copiedArgs, setCopiedArgs] = useState(false);
 
   const activePack = getShaderPack(shaderPack);
   const editCount = savedWorld ? Object.keys(savedWorld.blockEdits).length : 0;
+
+  const displayName =
+    account.mode === 'offline'
+      ? sanitizeJavaUsername(account.offlineUsername)
+      : account.msaGamertag.trim() || 'Microsoft Account';
+  const offlineUuid = computeJavaOfflineUuid(displayName);
 
   useEffect(() => {
     if (subView !== 'options') {
       setConfirmReset(false);
     }
   }, [subView]);
+
+  const handleAddServer = (e: React.FormEvent) => {
+    e.preventDefault();
+    const addr = newServerAddr.trim();
+    if (!addr) return;
+    const name = newServerName.trim() || addr;
+    const entry = {
+      id: `srv-${Date.now()}`,
+      name,
+      address: addr,
+    };
+    onChangeAccount({
+      ...account,
+      servers: [...account.servers, entry],
+    });
+    setSelectedServerAddr(addr);
+    setNewServerName('');
+    setNewServerAddr('');
+  };
+
+  const handleRemoveServer = (id: string) => {
+    const filtered = account.servers.filter((s) => s.id !== id);
+    onChangeAccount({ ...account, servers: filtered });
+    if (filtered.length > 0 && !filtered.some((s) => s.address === selectedServerAddr)) {
+      setSelectedServerAddr(filtered[0].address);
+    }
+  };
+
+  const handleCopyDirectConnect = async () => {
+    const args = buildJavaCliArgs(version.id, account, selectedServerAddr);
+    try {
+      await navigator.clipboard.writeText(args);
+      setCopiedArgs(true);
+      window.setTimeout(() => setCopiedArgs(false), 1800);
+    } catch {
+      // Ignore clipboard failure
+    }
+  };
+
+  const handleDownloadServerScript = () => {
+    const script = buildJavaLaunchScript(version, platform, account, null, selectedServerAddr);
+    const blob = new Blob([script.content], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = script.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
 
   return (
     <div className="fixed inset-0 z-20 flex flex-col justify-between p-4 sm:p-6 md:p-8 bg-gradient-to-b from-[#0b1016]/60 via-[#0b1016]/25 to-[#0b1016]/75 overflow-y-auto launcher-scroll">
@@ -125,13 +210,13 @@ export const GameMainMenu: React.FC<GameMainMenuProps> = ({
       <div className="w-full max-w-lg mx-auto my-auto py-4 flex flex-col items-center gap-5">
         <div className="text-center space-y-1.5">
           <div className="text-xs text-emerald-400 font-mono-tabular font-semibold tracking-wide">
-            {version.eraLabel} · {version.year}
+            Browser WebGL Sandbox · {account.mode === 'offline' ? `Offline (${displayName})` : `MSA (${displayName})`}
           </div>
           <h1 className="font-display text-3xl sm:text-5xl font-extrabold tracking-tight text-white">
-            Minecraft {version.id}
+            Sandbox {version.id}
           </h1>
           <p className="text-xs sm:text-sm text-slate-300 font-mono-tabular">
-            {version.name.replace(`${version.id} — `, '')} · Seed: {normalizeSeed(seed)}
+            Custom Three.js Preview · Seed: {normalizeSeed(seed)}
           </p>
         </div>
 
@@ -159,6 +244,21 @@ export const GameMainMenu: React.FC<GameMainMenuProps> = ({
             >
               <Play className="w-5 h-5 fill-slate-950" />
               <span>{savedWorld ? 'Singleplayer — Resume World' : 'Singleplayer — Enter World'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSubView('multiplayer')}
+              className="w-full h-11 px-4 rounded-xl bg-[#17202b] hover:bg-[#1f2b3a] border border-white/12 text-slate-100 flex items-center justify-between gap-3 text-sm font-semibold transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <Globe className="w-4 h-4 text-emerald-300" />
+                <span>Multiplayer (Java Servers)</span>
+              </span>
+              <span className="flex items-center gap-1.5 text-xs text-slate-300 font-normal">
+                <span>{account.mode === 'offline' ? 'Offline / LAN' : 'Online MSA'}</span>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </span>
             </button>
 
             <button
@@ -199,8 +299,138 @@ export const GameMainMenu: React.FC<GameMainMenuProps> = ({
               onClick={onBackToLauncher}
               className="w-full h-10 rounded-xl bg-[#0b1016] hover:bg-[#161f2b] border border-white/10 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
             >
-              Quit to Version Launcher (1.0 – 1.26.3)
+              Quit to Version Launcher
             </button>
+          </div>
+        )}
+
+        {subView === 'multiplayer' && (
+          <div className="w-full bg-[#10161e]/92 border border-white/14 rounded-xl p-5 space-y-3.5">
+            <div className="flex items-center justify-between pb-2 border-b border-white/10">
+              <div>
+                <h2 className="font-display text-lg font-bold text-white">Java Servers &amp; Account</h2>
+                <p className="text-xs text-slate-400 font-mono-tabular">
+                  {account.mode === 'offline'
+                    ? `Offline Free (${displayName}) · UUID ${offlineUuid.slice(0, 8)}...`
+                    : `Microsoft Online (${displayName})`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubView('main')}
+                className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-bold cursor-pointer hover:bg-emerald-400"
+              >
+                Done
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#0b1016] rounded-lg border border-white/10">
+              <button
+                type="button"
+                onClick={() => onChangeAccount({ ...account, mode: 'offline' })}
+                className={`py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
+                  account.mode === 'offline' ? 'bg-emerald-500 text-slate-950' : 'text-slate-300'
+                }`}
+              >
+                Offline (Free)
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeAccount({ ...account, mode: 'microsoft' })}
+                className={`py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
+                  account.mode === 'microsoft' ? 'bg-sky-400 text-slate-950' : 'text-slate-300'
+                }`}
+              >
+                Microsoft Online
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              {account.mode === 'offline'
+                ? 'Offline mode works free with LAN & offline-mode Java servers (online-mode=false) via the Rust or Android JVM launcher.'
+                : 'Microsoft Online uses your own Java-licensed Microsoft account via Device Code OAuth in the Rust Launcher to join official online servers.'}
+            </p>
+
+            {/* Saved Servers */}
+            <div className="space-y-1.5 max-h-36 overflow-y-auto launcher-scroll pr-1">
+              {account.servers.map((srv) => {
+                const selected = srv.address === selectedServerAddr;
+                return (
+                  <div
+                    key={srv.id}
+                    className={`px-3 py-2 rounded-lg border flex items-center justify-between gap-2 ${
+                      selected
+                        ? 'bg-emerald-500/15 border-emerald-400 text-white'
+                        : 'bg-[#17202b] border-white/10 text-slate-200'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedServerAddr(srv.address)}
+                      className="flex-1 text-left min-w-0 cursor-pointer"
+                    >
+                      <div className="text-xs font-semibold truncate">{srv.name}</div>
+                      <div className="text-[11px] font-mono-tabular text-slate-400 truncate">
+                        {srv.address}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveServer(srv.id)}
+                      aria-label={`Remove ${srv.name}`}
+                      className="p-1.5 rounded text-slate-400 hover:text-rose-300 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Add Server Form */}
+            <form onSubmit={handleAddServer} className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+              <input
+                type="text"
+                value={newServerName}
+                onChange={(e) => setNewServerName(e.target.value)}
+                placeholder="Server name"
+                className="sm:col-span-2 h-9 px-2.5 rounded-lg bg-[#0b1016] border border-white/15 text-xs text-white focus:outline-none focus:border-emerald-400"
+              />
+              <input
+                type="text"
+                value={newServerAddr}
+                onChange={(e) => setNewServerAddr(e.target.value)}
+                placeholder="host:25565"
+                className="sm:col-span-2 h-9 px-2.5 rounded-lg bg-[#0b1016] border border-white/15 text-xs font-mono-tabular text-white focus:outline-none focus:border-emerald-400"
+              />
+              <button
+                type="submit"
+                className="h-9 px-3 rounded-lg bg-[#17202b] hover:bg-[#223040] border border-white/15 text-xs font-semibold text-emerald-300 flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add</span>
+              </button>
+            </form>
+
+            {/* Launch Script / CLI Actions */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => void handleCopyDirectConnect()}
+                className="h-9 px-3 rounded-lg bg-[#17202b] hover:bg-[#202d3c] border border-white/12 text-xs font-semibold text-slate-200 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {copiedArgs ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedArgs ? 'Copied Args' : 'Copy JVM Args'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadServerScript}
+                className="h-9 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-xs font-bold text-slate-950 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export {platform === 'windows' ? '.bat' : '.sh'}</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -388,6 +618,37 @@ export const GameMainMenu: React.FC<GameMainMenuProps> = ({
                     <span>Touch</span>
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* World Terrain Type */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                World Terrain
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onChangeWorldType('superflat')}
+                  className={`h-9 rounded-lg border text-xs font-semibold cursor-pointer ${
+                    worldType === 'superflat'
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                      : 'bg-[#17202b] border-white/10 text-slate-300'
+                  }`}
+                >
+                  Superflat + Village
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChangeWorldType('normal')}
+                  className={`h-9 rounded-lg border text-xs font-semibold cursor-pointer ${
+                    worldType === 'normal'
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                      : 'bg-[#17202b] border-white/10 text-slate-300'
+                  }`}
+                >
+                  Normal Hills
+                </button>
               </div>
             </div>
 

@@ -24,6 +24,10 @@ export enum BlockId {
   CopperBlock = 20,
   Snow = 21,
   CraftingTable = 22,
+  RailNormal = 23,
+  RailStation = 24,
+  RailDepot = 25,
+  PlatformEdge = 26,
 }
 
 export interface BlockMeta {
@@ -269,15 +273,55 @@ export const BLOCK_META: Record<BlockId, BlockMeta> = {
     soundType: 'wood',
     tiles: [23, 24, 8],
   },
+  [BlockId.RailNormal]: {
+    id: BlockId.RailNormal,
+    name: 'Normal Rail (Silver)',
+    solid: false,
+    transparent: true,
+    opaque: false,
+    breakColor: 0xcbd5e1,
+    soundType: 'stone',
+    tiles: [25, 25, 25],
+  },
+  [BlockId.RailStation]: {
+    id: BlockId.RailStation,
+    name: 'Station Rail (Red)',
+    solid: false,
+    transparent: true,
+    opaque: false,
+    breakColor: 0xef4444,
+    soundType: 'stone',
+    tiles: [26, 26, 26],
+  },
+  [BlockId.RailDepot]: {
+    id: BlockId.RailDepot,
+    name: 'Depot Track (Yellow)',
+    solid: false,
+    transparent: true,
+    opaque: false,
+    breakColor: 0xfacc15,
+    soundType: 'stone',
+    tiles: [27, 27, 27],
+  },
+  [BlockId.PlatformEdge]: {
+    id: BlockId.PlatformEdge,
+    name: 'Station Platform Slab',
+    solid: true,
+    transparent: true,
+    opaque: false,
+    breakColor: 0x94a3b8,
+    soundType: 'stone',
+    tiles: [28, 29, 3],
+  },
 };
 
 export const HOTBAR_BLOCKS: BlockId[] = [
-  BlockId.Grass,
-  BlockId.Cobblestone,
-  BlockId.OakPlanks,
   BlockId.OakLog,
-  BlockId.Bricks,
+  BlockId.OakPlanks,
+  BlockId.Cobblestone,
+  BlockId.Grass,
   BlockId.Glass,
+  BlockId.Bricks,
   BlockId.Glowstone,
   BlockId.DiamondOre,
   BlockId.CraftingTable,
@@ -302,6 +346,10 @@ export const ALL_PLACEABLE_BLOCKS: BlockId[] = [
   BlockId.DiamondOre,
   BlockId.GoldOre,
   BlockId.CraftingTable,
+  BlockId.RailNormal,
+  BlockId.RailStation,
+  BlockId.RailDepot,
+  BlockId.PlatformEdge,
 ];
 
 // Atlas layout: 8x8 tiles (each tile is 16x16 px -> 128x128 canvas)
@@ -551,6 +599,143 @@ export function createProceduralAtlas(
     return shadeRgb(wood, (pseudoRand(x, y, 125) - 0.5) * 14);
   });
 
+  const drawRailTile = (
+    tileIdx: number,
+    railRgb: [number, number, number],
+    railHighlight: [number, number, number],
+    accentCenter?: [number, number, number],
+  ) => {
+    drawTile(tileIdx, (x, y) => {
+      // Twin metallic rails at x=3..4 and x=11..12
+      if (x === 3 || x === 11) return shadeRgb(railHighlight, 0);
+      if (x === 4 || x === 12) return shadeRgb(railRgb, -18);
+      // Optional center power/beacon strip for Station (Red) / Depot (Yellow)
+      if (accentCenter && (x === 7 || x === 8) && y % 4 !== 0) {
+        return shadeRgb(accentCenter, y % 2 === 0 ? 12 : -10);
+      }
+      // Wooden / concrete sleepers every 4 pixels
+      if (y % 4 === 1 || y % 4 === 2) {
+        if (x >= 1 && x <= 14) return shadeRgb([92, 68, 44], (pseudoRand(x, y, 130 + tileIdx) - 0.5) * 16);
+      }
+      // Ballast gravel bed underneath
+      return shadeRgb([86, 90, 98], (pseudoRand(x, y, 140 + tileIdx) - 0.5) * 26);
+    });
+  };
+
+  // 25: Normal Rail (Grey / Silver)
+  drawRailTile(25, [182, 190, 200], [228, 234, 242]);
+  // 26: Station Rail (Red)
+  drawRailTile(26, [215, 42, 42], [250, 92, 92], [239, 68, 68]);
+  // 27: Depot Track (Yellow)
+  drawRailTile(27, [230, 178, 18], [253, 224, 71], [250, 204, 21]);
+
+  // Helper for 90-degree NE corner curved rail (exits North y=0 and East x=15)
+  const drawRailCornerTile = (
+    tileIdx: number,
+    railRgb: [number, number, number],
+    railHighlight: [number, number, number],
+    accentCenter?: [number, number, number],
+  ) => {
+    drawTile(tileIdx, (x, y) => {
+      const dx = 15.5 - x;
+      const dy = y + 0.5;
+      const r = Math.hypot(dx, dy);
+      if ((r >= 11.1 && r <= 12.1) || (r >= 3.1 && r <= 4.1)) {
+        return shadeRgb(railHighlight, 0);
+      }
+      if ((r > 12.1 && r <= 13.0) || (r > 4.1 && r <= 5.0)) {
+        return shadeRgb(railRgb, -18);
+      }
+      if (accentCenter && r >= 7.2 && r <= 8.8) {
+        const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+        if (Math.floor(ang / 14) % 2 === 0) {
+          return shadeRgb(accentCenter, 8);
+        }
+      }
+      if (r >= 1.6 && r <= 14.3) {
+        const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+        if (ang % 24 < 9) {
+          return shadeRgb([92, 68, 44], (pseudoRand(x, y, 160 + tileIdx) - 0.5) * 16);
+        }
+      }
+      return shadeRgb([86, 90, 98], (pseudoRand(x, y, 170 + tileIdx) - 0.5) * 26);
+    });
+  };
+
+  // Helper for T-junction rail (connects West, East, and South)
+  const drawRailTJunctionTile = (
+    tileIdx: number,
+    railRgb: [number, number, number],
+    railHighlight: [number, number, number],
+    accentCenter?: [number, number, number],
+  ) => {
+    drawTile(tileIdx, (x, y) => {
+      const ewHighlight = y === 3 || y === 11;
+      const ewInner = y === 4 || y === 12;
+      const nsHighlight = y >= 4 && (x === 3 || x === 11);
+      const nsInner = y >= 4 && (x === 4 || x === 12);
+      if (ewHighlight || nsHighlight) return shadeRgb(railHighlight, 0);
+      if (ewInner || nsInner) return shadeRgb(railRgb, -18);
+      if (accentCenter && (((y === 7 || y === 8) && x % 4 !== 0) || ((x === 7 || x === 8) && y >= 8 && y % 4 !== 0))) {
+        return shadeRgb(accentCenter, 6);
+      }
+      if ((x % 4 === 1 || x % 4 === 2) && y >= 1 && y <= 14) {
+        return shadeRgb([92, 68, 44], (pseudoRand(x, y, 180 + tileIdx) - 0.5) * 16);
+      }
+      return shadeRgb([86, 90, 98], (pseudoRand(x, y, 190 + tileIdx) - 0.5) * 26);
+    });
+  };
+
+  // Helper for 4-way Cross rail
+  const drawRailCrossTile = (
+    tileIdx: number,
+    railRgb: [number, number, number],
+    railHighlight: [number, number, number],
+    accentCenter?: [number, number, number],
+  ) => {
+    drawTile(tileIdx, (x, y) => {
+      if (x === 3 || x === 11 || y === 3 || y === 11) return shadeRgb(railHighlight, 0);
+      if (x === 4 || x === 12 || y === 4 || y === 12) return shadeRgb(railRgb, -18);
+      if (accentCenter && ((x === 7 || x === 8 || y === 7 || y === 8) && (x + y) % 2 === 0)) {
+        return shadeRgb(accentCenter, 8);
+      }
+      if ((x === 1 || x === 14 || y === 1 || y === 14) && x >= 1 && x <= 14 && y >= 1 && y <= 14) {
+        return shadeRgb([92, 68, 44], (pseudoRand(x, y, 200 + tileIdx) - 0.5) * 16);
+      }
+      return shadeRgb([86, 90, 98], (pseudoRand(x, y, 210 + tileIdx) - 0.5) * 26);
+    });
+  };
+
+  // 30-32: Corner Curved Rails (Normal, Station, Depot)
+  drawRailCornerTile(30, [182, 190, 200], [228, 234, 242]);
+  drawRailCornerTile(31, [215, 42, 42], [250, 92, 92], [239, 68, 68]);
+  drawRailCornerTile(32, [230, 178, 18], [253, 224, 71], [250, 204, 21]);
+
+  // 33-35: T-Junction Rails (Normal, Station, Depot)
+  drawRailTJunctionTile(33, [182, 190, 200], [228, 234, 242]);
+  drawRailTJunctionTile(34, [215, 42, 42], [250, 92, 92], [239, 68, 68]);
+  drawRailTJunctionTile(35, [230, 178, 18], [253, 224, 71], [250, 204, 21]);
+
+  // 36-38: 4-Way Cross Rails (Normal, Station, Depot)
+  drawRailCrossTile(36, [182, 190, 200], [228, 234, 242]);
+  drawRailCrossTile(37, [215, 42, 42], [250, 92, 92], [239, 68, 68]);
+  drawRailCrossTile(38, [230, 178, 18], [253, 224, 71], [250, 204, 21]);
+
+  // 28: Station Platform Top (concrete with yellow tactile safety edge)
+  drawTile(28, (x, y) => {
+    if (y <= 2 || y >= 13) {
+      return shadeRgb([245, 198, 24], (x % 2 === 0 ? 8 : -10));
+    }
+    return shadeRgb([156, 163, 175], (pseudoRand(x, y, 150) - 0.5) * 16);
+  });
+
+  // 29: Station Platform Side
+  drawTile(29, (x, y) => {
+    if (y < 2) return shadeRgb([238, 190, 22], 0);
+    if (y >= 13) return shadeRgb([75, 85, 99], 0);
+    return shadeRgb([138, 144, 156], (pseudoRand(x, y, 155) - 0.5) * 18);
+  });
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.magFilter = THREE.NearestFilter;
@@ -588,4 +773,36 @@ export function createProceduralAtlas(
   }
 
   return { texture, tileIcons };
+}
+
+// THREE.BoxGeometry group face order: 0=+X(side), 1=-X(side), 2=+Y(top), 3=-Y(bottom), 4=+Z(side), 5=-Z(side)
+export function updateHeldBlockUvs(geo: THREE.BoxGeometry, blockId: BlockId): void {
+  const meta = BLOCK_META[blockId] ?? BLOCK_META[BlockId.OakPlanks];
+  const uvAttr = geo.attributes.uv as THREE.BufferAttribute;
+  const tileStep = 1 / ATLAS_GRID;
+  const eps = 0.002;
+  const faceToMetaIdx = [1, 1, 0, 2, 1, 1];
+
+  for (let face = 0; face < 6; face++) {
+    const tileIdx = meta.tiles[faceToMetaIdx[face]];
+    const col = tileIdx % ATLAS_GRID;
+    const row = Math.floor(tileIdx / ATLAS_GRID);
+    const u0 = col * tileStep + eps;
+    const u1 = (col + 1) * tileStep - eps;
+    const v1 = 1 - row * tileStep - eps;
+    const v0 = 1 - (row + 1) * tileStep + eps;
+
+    const base = face * 4;
+    uvAttr.setXY(base + 0, u0, v1);
+    uvAttr.setXY(base + 1, u1, v1);
+    uvAttr.setXY(base + 2, u0, v0);
+    uvAttr.setXY(base + 3, u1, v0);
+  }
+  uvAttr.needsUpdate = true;
+}
+
+export function createHeldBlockGeometry(initialBlockId: BlockId): THREE.BoxGeometry {
+  const geo = new THREE.BoxGeometry(0.145, 0.145, 0.145);
+  updateHeldBlockUvs(geo, initialBlockId);
+  return geo;
 }

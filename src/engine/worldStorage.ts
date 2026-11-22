@@ -1,4 +1,6 @@
 import { GameMode, PerformancePreset, PlatformTarget } from '../data/versions';
+import { ForgeModId, ModCodeLanguage } from '../data/forgeMods';
+import { MtrDepotConfig, MtrStationAnnouncement } from '../data/mtrTransit';
 import { ShaderPackId } from './shaderPacks';
 
 const DB_NAME = 'voxelforge_worlds_db';
@@ -6,6 +8,8 @@ const DB_VERSION = 1;
 const STORE_NAME = 'worlds';
 const PREFS_KEY = 'voxelforge_launcher_prefs_v1';
 const FALLBACK_PREFIX = 'voxelforge_world_';
+
+export type WorldType = 'normal' | 'superflat';
 
 export interface SavedPlayerState {
   x: number;
@@ -20,12 +24,15 @@ export interface SavedWorldState {
   key: string;
   versionId: string;
   seed: string;
+  worldType?: WorldType;
   updatedAt: number;
   worldTime?: number;
   player: SavedPlayerState;
   hotbar: number[];
   activeSlot: number;
   blockEdits: Record<string, number>;
+  mtrDepots?: MtrDepotConfig[];
+  mtrAnnouncements?: Record<string, MtrStationAnnouncement>;
 }
 
 export interface LauncherPreferences {
@@ -33,18 +40,21 @@ export interface LauncherPreferences {
   platform: PlatformTarget;
   performance: PerformancePreset;
   gameMode: GameMode;
+  worldType?: WorldType;
   seed: string;
   muted: boolean;
   shaderPack?: ShaderPackId;
   dayCycleSpeed?: number;
+  activeMods?: ForgeModId[];
+  modCodeLang?: ModCodeLanguage;
 }
 
 export function normalizeSeed(seed: string): string {
   return (seed || 'voxelforge').trim() || 'voxelforge';
 }
 
-export function makeWorldKey(versionId: string, seed: string): string {
-  return `${versionId}::${normalizeSeed(seed)}`;
+export function makeWorldKey(versionId: string, seed: string, worldType: WorldType = 'superflat'): string {
+  return `${versionId}::${worldType}::${normalizeSeed(seed)}`;
 }
 
 export function saveLauncherPrefs(prefs: LauncherPreferences): void {
@@ -106,8 +116,9 @@ export async function saveWorldState(state: SavedWorldState): Promise<void> {
 export async function loadWorldState(
   versionId: string,
   seed: string,
+  worldType: WorldType = 'superflat',
 ): Promise<SavedWorldState | null> {
-  const key = makeWorldKey(versionId, seed);
+  const key = makeWorldKey(versionId, seed, worldType);
   try {
     const db = await openWorldDb();
     const res = await new Promise<SavedWorldState | null>((resolve, reject) => {
@@ -131,8 +142,12 @@ export async function loadWorldState(
   }
 }
 
-export async function deleteWorldState(versionId: string, seed: string): Promise<void> {
-  const key = makeWorldKey(versionId, seed);
+export async function deleteWorldState(
+  versionId: string,
+  seed: string,
+  worldType: WorldType = 'superflat',
+): Promise<void> {
+  const key = makeWorldKey(versionId, seed, worldType);
   try {
     const db = await openWorldDb();
     await new Promise<void>((resolve, reject) => {
